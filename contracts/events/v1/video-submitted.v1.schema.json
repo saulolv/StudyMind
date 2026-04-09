@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://studymind/contracts/events/v1/video-submitted.v1.schema.json",
+  "title": "VideoSubmittedV1",
+  "allOf": [
+    {
+      "$ref": "./event-envelope.v1.schema.json"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "event_type": {
+          "const": "VideoSubmitted"
+        },
+        "source_service": {
+          "const": "video-service"
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "content_id",
+            "user_id",
+            "type",
+            "video_url"
+          ],
+          "properties": {
+            "content_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "user_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": {
+              "type": "string",
+              "const": "VIDEO"
+            },
+            "video_url": {
+              "type": "string",
+              "format": "uri"
+            },
+            "title": {
+              "type": "string"
+            },
+            "duration_seconds": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        }
+      }
+    }
+  ]
+}

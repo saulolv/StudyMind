@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://studymind/contracts/events/v1/content-uploaded.v1.schema.json",
+  "title": "ContentUploadedV1",
+  "allOf": [
+    {
+      "$ref": "./event-envelope.v1.schema.json"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "event_type": {
+          "const": "ContentUploaded"
+        },
+        "source_service": {
+          "const": "document-service"
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "content_id",
+            "user_id",
+            "type",
+            "storage_path",
+            "file_name"
+          ],
+          "properties": {
+            "content_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "user_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": {
+              "type": "string",
+              "const": "PDF"
+            },
+            "storage_path": {
+              "type": "string",
+              "minLength": 1
+            },
+            "file_name": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    }
+  ]
+}

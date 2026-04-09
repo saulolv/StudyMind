@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://studymind/contracts/events/v1/content-indexed.v1.schema.json",
+  "title": "ContentIndexedV1",
+  "allOf": [
+    {
+      "$ref": "./event-envelope.v1.schema.json"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "event_type": {
+          "const": "ContentIndexed"
+        },
+        "source_service": {
+          "const": "embedding-worker"
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "content_id",
+            "user_id",
+            "type",
+            "indexed_chunk_count",
+            "qdrant_collection"
+          ],
+          "properties": {
+            "content_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "user_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "PDF",
+                "VIDEO"
+              ]
+            },
+            "indexed_chunk_count": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "qdrant_collection": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    }
+  ]
+}
