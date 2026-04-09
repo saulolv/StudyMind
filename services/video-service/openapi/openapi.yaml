@@ -1,0 +1,136 @@
+openapi: 3.0.3
+info:
+  title: StudyMind Video Service API
+  version: 1.0.0
+  description: YouTube ingestion endpoints and asynchronous transcription status.
+servers:
+  - url: http://localhost:8082
+tags:
+  - name: Videos
+  - name: Internal
+paths:
+  /videos:
+    post:
+      tags: [Videos]
+      summary: Submit YouTube URL for asynchronous processing
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VideoSubmitRequest"
+      responses:
+        "202":
+          description: Video accepted for processing
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VideoSubmitResponse"
+        "400":
+          description: Invalid URL or validation error
+        "401":
+          description: Unauthorized
+  /videos/{contentId}:
+    get:
+      tags: [Videos]
+      summary: Get video content and transcription status
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ContentIdParam"
+      responses:
+        "200":
+          description: Video status response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VideoStatusResponse"
+        "404":
+          description: Content not found
+  /internal/videos/{contentId}/ownership:
+    get:
+      tags: [Internal]
+      summary: Internal endpoint to validate ownership/status
+      parameters:
+        - $ref: "#/components/parameters/ContentIdParam"
+        - in: query
+          name: user_id
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Ownership and status result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VideoOwnershipResponse"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    ContentIdParam:
+      in: path
+      name: contentId
+      required: true
+      schema:
+        type: string
+        format: uuid
+  schemas:
+    VideoSubmitRequest:
+      type: object
+      required: [url]
+      properties:
+        url:
+          type: string
+          format: uri
+          description: Must be youtube.com/watch?v=... or youtu.be/...
+    VideoSubmitResponse:
+      type: object
+      required: [content_id, status]
+      properties:
+        content_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          example: pending
+    VideoStatusResponse:
+      type: object
+      required: [content_id, status, transcript_status]
+      properties:
+        content_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          example: pending
+        transcript_status:
+          type: string
+          example: pending
+        title:
+          type: string
+        duration_seconds:
+          type: integer
+    VideoOwnershipResponse:
+      type: object
+      required: [content_id, user_id, is_owner, status, transcript_status]
+      properties:
+        content_id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        is_owner:
+          type: boolean
+        status:
+          type: string
+        transcript_status:
+          type: string

@@ -1,0 +1,192 @@
+openapi: 3.0.3
+info:
+  title: StudyMind Document Service API
+  version: 1.0.0
+  description: PDF upload, metadata retrieval, and content lifecycle endpoints.
+servers:
+  - url: http://localhost:8081
+tags:
+  - name: Documents
+  - name: Contents
+  - name: Internal
+paths:
+  /documents:
+    post:
+      tags: [Documents]
+      summary: Upload PDF document
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        "202":
+          description: Upload accepted for asynchronous processing
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadAcceptedResponse"
+        "400":
+          description: Invalid file or validation error
+        "401":
+          description: Unauthorized
+  /contents:
+    get:
+      tags: [Contents]
+      summary: List user contents with pagination
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: page
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - in: query
+          name: size
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        "200":
+          description: Paginated contents
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContentListResponse"
+  /contents/{contentId}:
+    get:
+      tags: [Contents]
+      summary: Get content status and metadata
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ContentIdParam"
+      responses:
+        "200":
+          description: Content details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContentDetailsResponse"
+        "404":
+          description: Content not found
+    delete:
+      tags: [Contents]
+      summary: Delete content and trigger asynchronous cleanup
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ContentIdParam"
+      responses:
+        "202":
+          description: Deletion accepted
+        "404":
+          description: Content not found
+  /internal/contents/{contentId}/ownership:
+    get:
+      tags: [Internal]
+      summary: Internal endpoint to validate ownership
+      parameters:
+        - $ref: "#/components/parameters/ContentIdParam"
+        - in: query
+          name: user_id
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Ownership evaluation result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OwnershipResponse"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    ContentIdParam:
+      in: path
+      name: contentId
+      required: true
+      schema:
+        type: string
+        format: uuid
+  schemas:
+    UploadAcceptedResponse:
+      type: object
+      required: [content_id, status]
+      properties:
+        content_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          example: pending
+    ContentListResponse:
+      type: object
+      required: [items, page, size, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ContentSummary"
+        page:
+          type: integer
+        size:
+          type: integer
+        total:
+          type: integer
+          format: int64
+    ContentSummary:
+      type: object
+      properties:
+        content_id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          example: PDF
+        status:
+          type: string
+          example: pending
+        file_name:
+          type: string
+    ContentDetailsResponse:
+      allOf:
+        - $ref: "#/components/schemas/ContentSummary"
+        - type: object
+          properties:
+            storage_path:
+              type: string
+              example: s3://studymind/raw/user/content/file.pdf
+            uploaded_at:
+              type: string
+              format: date-time
+    OwnershipResponse:
+      type: object
+      required: [content_id, user_id, is_owner]
+      properties:
+        content_id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        is_owner:
+          type: boolean

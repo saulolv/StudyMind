@@ -1,0 +1,155 @@
+openapi: 3.0.3
+info:
+  title: StudyMind Chat LLM Service API
+  version: 1.0.0
+  description: Session-based RAG chat endpoints with optional streaming support.
+servers:
+  - url: http://localhost:8083
+tags:
+  - name: Chat
+paths:
+  /chat/sessions:
+    post:
+      tags: [Chat]
+      summary: Create chat session
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSessionRequest"
+      responses:
+        "201":
+          description: Session created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatSession"
+    get:
+      tags: [Chat]
+      summary: List user chat sessions
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Session list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ChatSession"
+  /chat/sessions/{id}/messages:
+    post:
+      tags: [Chat]
+      summary: Send question and get RAG answer (JSON or SSE)
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/SessionIdParam"
+        - in: query
+          name: stream
+          schema:
+            type: boolean
+            default: false
+          description: If true, returns text/event-stream
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SendMessageRequest"
+      responses:
+        "200":
+          description: Assistant answer response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SendMessageResponse"
+            text/event-stream:
+              schema:
+                type: string
+                description: Server-Sent Events stream of generated tokens
+        "400":
+          description: Invalid request
+        "401":
+          description: Unauthorized
+        "404":
+          description: Session not found
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    SessionIdParam:
+      in: path
+      name: id
+      required: true
+      schema:
+        type: string
+        format: uuid
+  schemas:
+    CreateSessionRequest:
+      type: object
+      properties:
+        title:
+          type: string
+          maxLength: 120
+    ChatSession:
+      type: object
+      required: [id, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    SendMessageRequest:
+      type: object
+      required: [question]
+      properties:
+        question:
+          type: string
+        content_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+    SendMessageResponse:
+      type: object
+      required: [answer, chunk_ids]
+      properties:
+        answer:
+          type: string
+        chunk_ids:
+          type: array
+          items:
+            type: string
+        citations:
+          type: array
+          items:
+            type: object
+            properties:
+              chunk_id:
+                type: string
+              content_id:
+                type: string
+                format: uuid
+              start_seconds:
+                type: number
+              end_seconds:
+                type: number
