@@ -16,29 +16,26 @@ It uses Retrieval-Augmented Generation (RAG) to answer questions, generate summa
 flowchart TD
   user[StudentUser] --> spa[AngularSPA]
   spa --> gateway[ApiGatewayAuthService]
-  gateway --> docsvc[DocumentService]
-  gateway --> vidsvc[VideoService]
+  gateway --> contentsvc[ContentService]
   gateway --> chatsvc[ChatLlmService]
 
   gateway --> authdb[(AuthDB)]
-  docsvc --> docdb[(DocumentDB)]
-  vidsvc --> viddb[(VideoDB)]
+  contentsvc --> contentdb[(ContentDB)]
   chatsvc --> chatdb[(ChatDB)]
 
-  docsvc --> mq[(RabbitMQ)]
-  vidsvc --> mq
+  contentsvc --> minio[(MinIO)]
+  contentsvc --> mq[(RabbitMQ)]
   chatsvc --> mq
 
   mq --> proc[ProcessingWorkerPython]
   mq --> emb[EmbeddingWorkerPython]
   mq --> tr[TranscriptionWorkerPython]
 
-  proc --> docdb
+  proc --> contentdb
   proc --> mq
   emb --> qdrant[(Qdrant)]
-  emb --> docdb
-  emb --> viddb
-  tr --> viddb
+  emb --> contentdb
+  tr --> contentdb
   tr --> mq
 
   emb --> openai[OpenAIEmbeddings]
@@ -53,7 +50,7 @@ flowchart TD
 
 | Layer         | Choice                                          |
 | ------------- | ----------------------------------------------- |
-| Core services | Java 21 + Spring Boot 3 (4 services)            |
+| Core services | Java 21 + Spring Boot 4 (3 services)            |
 | Frontend      | Angular 17+ + PrimeNG + Signals                 |
 | Workers       | Python 3.11 (consumer workers)                  |
 | Relational DB | PostgreSQL 16                                   |
@@ -70,7 +67,16 @@ flowchart TD
 ```text
 StudyMind/
 ├── README.md
-└── docs/
+├── CLAUDE.md
+├── docker-compose.yml
+├── .env.example
+├── contracts/
+│   └── events/v1/              # JSON Schemas for every RabbitMQ event
+├── services/
+│   ├── api-gateway-auth/       # JWT auth and edge routing (scaffold)
+│   ├── content-service/        # PDF and YouTube ingestion (implemented)
+│   └── chat-llm-service/       # RAG chat (scaffold)
+└── docs/                       # not in git; see .gitignore
     ├── architecture/
     │   ├── ARCHITECTURE.md
     │   ├── DATA-MODEL.md
@@ -79,18 +85,24 @@ StudyMind/
     ├── development/
     │   ├── 00-environment-setup.md
     │   ├── 01-api-gateway-auth.md
-    │   ├── 02-document-service.md
+    │   ├── 02-content-service.md
     │   ├── 03-processing-worker.md
     │   ├── 04-embedding-worker.md
     │   ├── 05-chat-rag-service.md
-    │   ├── 06-video-service.md
-    │   ├── 07-transcription-worker.md
-    │   ├── 08-llm-service.md
-    │   ├── 09-quiz-flashcard-service.md
-    │   ├── 10-frontend.md
-    │   └── 11-observability-deploy.md
+    │   ├── 06-transcription-worker.md
+    │   ├── 07-quiz-flashcard-service.md
+    │   ├── 08-frontend.md
+    │   └── 09-observability-deploy.md
     └── DEPLOYMENT.md
 ```
+
+### Why one content-service and not document + video
+
+PDF upload and YouTube submission are two ways of naming a source for the same thing: a unit of
+content owned by a user. Split across two services they duplicated the resource, the ownership
+endpoint and the event shape, while everything downstream (`ChunksCreated`, `ContentIndexed`)
+already discriminated on a single `type` field. They are now one service with a sealed
+`ContentSource` — one seam, two adapters. A third source is a new variant, not a new deployable.
 
 ## Quick Start (Documentation-First Setup)
 
@@ -99,11 +111,13 @@ StudyMind/
   - `cd StudyMind`
 2. Read setup guide:
   - `docs/development/00-environment-setup.md`
-3. Bring infra up:
+3. Configure environment variables:
+  - `cp .env.example .env` — compose declares no defaults and fails without it
+4. Bring infra up:
   - `docker compose up -d`
-4. Configure environment variables:
-  - copy `.env.example` to `.env` per setup guide
-5. Implement in order:
+5. Build and test a service:
+  - `cd services/content-service && ./mvnw verify`
+6. Implement in order:
   - follow numbered files in `docs/development/`
 
 ## Roadmap

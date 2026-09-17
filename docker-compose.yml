@@ -16,37 +16,21 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-  postgres-document:
+  # Replaces postgres-document and postgres-video: one database for one content-service.
+  postgres-content:
     image: postgres:16
-    container_name: studymind-postgres-document
+    container_name: studymind-postgres-content
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ${DOC_DB_NAME}
-      POSTGRES_USER: ${DOC_DB_USER}
-      POSTGRES_PASSWORD: ${DOC_DB_PASSWORD}
+      POSTGRES_DB: ${CONTENT_DB_NAME}
+      POSTGRES_USER: ${CONTENT_DB_USER}
+      POSTGRES_PASSWORD: ${CONTENT_DB_PASSWORD}
     ports:
       - 5434:5432
     volumes:
-      - postgres_document_data:/var/lib/postgresql/data
+      - postgres_content_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DOC_DB_USER}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-  postgres-video:
-    image: postgres:16
-    container_name: studymind-postgres-video
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: ${VIDEO_DB_NAME}
-      POSTGRES_USER: ${VIDEO_DB_USER}
-      POSTGRES_PASSWORD: ${VIDEO_DB_PASSWORD}
-    ports:
-      - 5435:5432
-    volumes:
-      - postgres_video_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${VIDEO_DB_USER}"]
+      test: ["CMD-SHELL", "pg_isready -U ${CONTENT_DB_USER}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -123,11 +107,28 @@ services:
       - 9001:9001
     volumes:
       - minio_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "mc ready local || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+  # content-service expects the bucket to exist; MinIO does not create it on demand.
+  minio-init:
+    image: minio/mc:latest
+    container_name: studymind-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD} &&
+      mc mb --ignore-existing local/${STORAGE_BUCKET} &&
+      echo 'bucket ${STORAGE_BUCKET} ready'
+      "
 
 volumes:
   postgres_auth_data:
-  postgres_document_data:
-  postgres_video_data:
+  postgres_content_data:
   postgres_chat_data:
   redis_data:
   rabbitmq_data:

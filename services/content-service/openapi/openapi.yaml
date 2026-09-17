@@ -1,0 +1,303 @@
+openapi: 3.0.3
+info:
+  title: StudyMind Content Service API
+  version: 1.0.0
+  description: |
+    Ingestion, retrieval and lifecycle for every unit of study material, whether it arrived as an
+    uploaded PDF or a submitted YouTube link.
+
+    This service replaces document-service and video-service. Those two carried the same resource
+    (a user-owned content with a status), the same internal ownership endpoint, and emitted the
+    same event shape under two names, while everything downstream already discriminated on a
+    single `type` field. `POST /contents` is selected by request media type: `multipart/form-data`
+    for a PDF, `application/json` for a video URL.
+servers:
+  - url: http://localhost:8081
+tags:
+  - name: Contents
+  - name: Internal
+  - name: Health
+paths:
+  /actuator/health:
+    get:
+      tags: [Health]
+      summary: Service health
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /contents:
+    post:
+      tags: [Contents]
+      summary: Submit content for asynchronous processing
+      description: |
+        One endpoint, two sources. Send `multipart/form-data` with a `file` part to upload a PDF,
+        or `application/json` with a `url` to submit a YouTube video. Both return 202 with the
+        same body and both emit a single `ContentSubmitted` event.
+      security:
+        - gatewayUser: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: PDF file. Verified by magic bytes, not by the declared content type.
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubmitVideoRequest"
+      responses:
+        "202":
+          description: Accepted for asynchronous processing
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContentAcceptedResponse"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+    get:
+      tags: [Contents]
+      summary: List the caller's contents, newest first
+      security:
+        - gatewayUser: []
+      parameters:
+        - in: query
+          name: page
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - in: query
+          name: size
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        "200":
+          description: Paginated contents
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContentListResponse"
+        "401":
+          $ref: "#/components/responses/Problem"
+  /contents/{contentId}:
+    get:
+      tags: [Contents]
+      summary: Get content status and metadata
+      security:
+        - gatewayUser: []
+      parameters:
+        - $ref: "#/components/parameters/ContentIdParam"
+      responses:
+        "200":
+          description: Content details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContentDetailsResponse"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+    delete:
+      tags: [Contents]
+      summary: Delete content and trigger asynchronous cleanup
+      description: |
+        Removes the content row and emits `ContentDeleted`. Blob and vector removal are performed
+        by the consumers of that event, which is what the 202 means.
+      security:
+        - gatewayUser: []
+      parameters:
+        - $ref: "#/components/parameters/ContentIdParam"
+      responses:
+        "202":
+          description: Deletion accepted
+        "401":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+  /internal/contents:
+    get:
+      tags: [Internal]
+      summary: Readiness of a batch of contents belonging to the caller
+      description: |
+        Replaces the `/internal/contents/{id}/ownership` and `/internal/videos/{id}/ownership`
+        endpoints. It reports readiness for a batch rather than a boolean for one id, and it reads
+        the user from the authenticated `X-User-Id` header instead of a query parameter, so it can
+        no longer be asked about an arbitrary user. Ids that do not exist, or belong to someone
+        else, are simply absent from the response.
+      security:
+        - gatewayUser: []
+      parameters:
+        - in: query
+          name: ids
+          required: true
+          schema:
+            type: array
+            items:
+              type: string
+              format: uuid
+          style: form
+          explode: false
+      responses:
+        "200":
+          description: Status for each matching content
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalContentStatusResponse"
+        "401":
+          $ref: "#/components/responses/Problem"
+components:
+  securitySchemes:
+    gatewayUser:
+      type: apiKey
+      in: header
+      name: X-User-Id
+      description: |
+        Set by api-gateway-auth after it validates the JWT. This service never sees a token, so it
+        must not be reachable from outside the internal network.
+  parameters:
+    ContentIdParam:
+      in: path
+      name: contentId
+      required: true
+      schema:
+        type: string
+        format: uuid
+  responses:
+    Problem:
+      description: RFC 9457 problem details
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetail"
+  schemas:
+    ProblemDetail:
+      type: object
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string
+          format: uri
+    ContentType:
+      type: string
+      enum: [PDF, VIDEO]
+    ContentStatus:
+      type: string
+      enum: [PENDING, PROCESSING, INDEXED, FAILED]
+      description: |
+        One lifecycle for both types. The old video-service carried a separate `transcript_status`;
+        transcription is simply the PROCESSING stage of a VIDEO.
+    SubmitVideoRequest:
+      type: object
+      required: [url]
+      properties:
+        url:
+          type: string
+          format: uri
+          description: |
+            A YouTube video URL. `youtube.com/watch?v=`, `youtu.be/`, `/shorts/` and `/embed/` are
+            accepted and canonicalised to `https://www.youtube.com/watch?v=<id>`.
+    ContentAcceptedResponse:
+      type: object
+      required: [content_id, type, status]
+      properties:
+        content_id:
+          type: string
+          format: uuid
+        type:
+          $ref: "#/components/schemas/ContentType"
+        status:
+          $ref: "#/components/schemas/ContentStatus"
+    ContentSummaryResponse:
+      type: object
+      required: [content_id, type, status]
+      properties:
+        content_id:
+          type: string
+          format: uuid
+        type:
+          $ref: "#/components/schemas/ContentType"
+        status:
+          $ref: "#/components/schemas/ContentStatus"
+        file_name:
+          type: string
+          description: PDF only.
+        source_url:
+          type: string
+          format: uri
+          description: Video only.
+        title:
+          type: string
+        duration_seconds:
+          type: integer
+    ContentDetailsResponse:
+      allOf:
+        - $ref: "#/components/schemas/ContentSummaryResponse"
+        - type: object
+          properties:
+            storage_path:
+              type: string
+              description: PDF only.
+              example: raw/6f1b.../a2c9.../lecture.pdf
+            created_at:
+              type: string
+              format: date-time
+            updated_at:
+              type: string
+              format: date-time
+    ContentListResponse:
+      type: object
+      required: [items, page, size, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ContentSummaryResponse"
+        page:
+          type: integer
+        size:
+          type: integer
+        total:
+          type: integer
+          format: int64
+    InternalContentStatusResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            required: [content_id, type, status]
+            properties:
+              content_id:
+                type: string
+                format: uuid
+              type:
+                $ref: "#/components/schemas/ContentType"
+              status:
+                $ref: "#/components/schemas/ContentStatus"

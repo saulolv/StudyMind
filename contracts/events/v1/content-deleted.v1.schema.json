@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://studymind/contracts/events/v1/content-deleted.v1.schema.json",
+  "title": "ContentDeletedV1",
+  "description": "Carries the asynchronous cleanup that DELETE /contents/{contentId} accepts with a 202.",
+  "allOf": [
+    {
+      "$ref": "./event-envelope.v1.schema.json"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "event_type": {
+          "const": "ContentDeleted"
+        },
+        "source_service": {
+          "const": "content-service"
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "content_id",
+            "user_id",
+            "type"
+          ],
+          "properties": {
+            "content_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "user_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "PDF",
+                "VIDEO"
+              ]
+            },
+            "storage_path": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://studymind/contracts/events/v1/content-submitted.v1.schema.json",
+  "title": "ContentSubmittedV1",
+  "description": "Replaces ContentUploaded and VideoSubmitted with one event discriminated by type, matching ChunksCreated and ContentIndexed downstream.",
+  "allOf": [
+    {
+      "$ref": "./event-envelope.v1.schema.json"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "event_type": {
+          "const": "ContentSubmitted"
+        },
+        "source_service": {
+          "const": "content-service"
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "content_id",
+            "user_id",
+            "type"
+          ],
+          "properties": {
+            "content_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "user_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "PDF",
+                "VIDEO"
+              ]
+            },
+            "storage_path": {
+              "type": "string",
+              "minLength": 1
+            },
+            "file_name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "source_url": {
+              "type": "string",
+              "format": "uri"
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "required": [
+                  "type"
+                ],
+                "properties": {
+                  "type": {
+                    "const": "PDF"
+                  }
+                }
+              },
+              "then": {
+                "required": [
+                  "storage_path",
+                  "file_name"
+                ]
+              }
+            },
+            {
+              "if": {
+                "required": [
+                  "type"
+                ],
+                "properties": {
+                  "type": {
+                    "const": "VIDEO"
+                  }
+                }
+              },
+              "then": {
+                "required": [
+                  "source_url"
+                ]
+              }
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
