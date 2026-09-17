@@ -1,0 +1,269 @@
+name: CI
+
+# A polyglot repository drifts one language at a time. Every language in it is built here, and the
+# jobs discover what to build rather than being edited each time a service or a worker is added.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  JAVA_VERSION: "21"
+  PYTHON_VERSION: "3.11"
+  NODE_VERSION: "22"
+  SPECTRAL_VERSION: "6.15.0"
+
+jobs:
+  discover:
+    name: Discover projects
+    runs-on: ubuntu-latest
+    outputs:
+      services: ${{ steps.find.outputs.services }}
+      python_projects: ${{ steps.find.outputs.python_projects }}
+      has_frontend: ${{ steps.find.outputs.has_frontend }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: find
+        name: Find every buildable project
+        run: |
+          set -euo pipefail
+
+          # Each service is an independent Maven project with its own wrapper; there is no
+          # aggregator POM, so the matrix is the list of directories that have a pom.xml.
+          services=$(find services -mindepth 2 -maxdepth 2 -name pom.xml -printf '%h\n' \
+            | sort | jq -R . | jq -sc .)
+          echo "services=$services" >> "$GITHUB_OUTPUT"
+
+          # The Python workers land under workers/ and are picked up here the day they appear.
+          python_projects=$(find . -name pyproject.toml \
+            -not -path '*/.venv/*' -not -path '*/node_modules/*' -not -path './.git/*' \
+            -printf '%h\n' | sed 's|^\./||' | sort | jq -R . | jq -sc .)
+          echo "python_projects=$python_projects" >> "$GITHUB_OUTPUT"
+
+          if [ -f frontend/package.json ]; then
+            echo "has_frontend=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_frontend=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          echo "services: $services"
+          echo "python: $python_projects"
+
+  backend:
+    name: Backend ${{ matrix.service }}
+    needs: discover
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJSON(needs.discover.outputs.services) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: meta
+        run: echo "slug=$(basename '${{ matrix.service }}')" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: maven
+
+      # `verify` runs the tests and then the JaCoCo gate, which is configured in each POM at 90%
+      # line and branch coverage. JaCoCo skips silently when a module ran no tests at all, so the
+      # step below refuses that case explicitly rather than letting it look like a pass.
+      - name: Refuse production code with no test suite
+        working-directory: ${{ matrix.service }}
+        run: |
+          set -euo pipefail
+          classes=$(find src/main/java -name '*.java' -not -name '*Application.java' | wc -l)
+          tests=0
+          # A scaffold has no src/test/java at all, which git does not track as an empty directory.
+          if [ -d src/test/java ]; then
+            tests=$(find src/test/java -name '*Test.java' | wc -l)
+          fi
+          echo "$classes production class(es), $tests test class(es)"
+          if [ "$classes" -gt 0 ] && [ "$tests" -eq 0 ]; then
+            echo "::error::${{ matrix.service }} has production code but no tests, so the" \
+                 "coverage gate would be skipped instead of enforced."
+            exit 1
+          fi
+
+      - name: Build, test and check coverage
+        working-directory: ${{ matrix.service }}
+        run: ./mvnw -B -ntp verify
+
+      - name: Report coverage
+        if: always()
+        working-directory: ${{ matrix.service }}
+        run: |
+          report=target/site/jacoco/jacoco.csv
+          if [ ! -f "$report" ]; then
+            echo "No coverage report: this service has no tests yet." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          awk -F, 'NR>1 {lm+=$8; lc+=$9; bm+=$6; bc+=$7} END {
+            printf "### %s\n\n| Counter | Covered | Total | Ratio |\n|---|---|---|---|\n", svc
+            if (lc+lm > 0) printf "| Line | %d | %d | %.1f%% |\n", lc, lc+lm, 100*lc/(lc+lm)
+            if (bc+bm > 0) printf "| Branch | %d | %d | %.1f%% |\n", bc, bc+bm, 100*bc/(bc+bm)
+          }' svc="${{ matrix.service }}" "$report" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload test and coverage reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports-${{ steps.meta.outputs.slug }}
+          path: |
+            ${{ matrix.service }}/target/surefire-reports/
+            ${{ matrix.service }}/target/site/jacoco/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  frontend:
+    name: Frontend
+    needs: discover
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The Angular SPA does not exist yet. This job is wired now so that the first commit adding
+      # frontend/package.json is tested by CI rather than by whoever notices it is broken.
+      - name: Report that there is no frontend yet
+        if: needs.discover.outputs.has_frontend != 'true'
+        run: |
+          echo "No frontend/package.json in this repository yet; nothing to test." \
+            >> "$GITHUB_STEP_SUMMARY"
+          echo "When it lands it must provide 'npm run lint' and 'npm run test:ci'." \
+            >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/setup-node@v4
+        if: needs.discover.outputs.has_frontend == 'true'
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        if: needs.discover.outputs.has_frontend == 'true'
+        working-directory: frontend
+        run: npm ci
+
+      - name: Lint
+        if: needs.discover.outputs.has_frontend == 'true'
+        working-directory: frontend
+        run: npm run lint
+
+      # `test:ci` rather than `test`: the Angular default runs a watching browser and never exits.
+      - name: Test
+        if: needs.discover.outputs.has_frontend == 'true'
+        working-directory: frontend
+        run: npm run test:ci
+
+  python:
+    name: Python ${{ matrix.project }}
+    needs: discover
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        project: ${{ fromJSON(needs.discover.outputs.python_projects) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: "**/pyproject.toml"
+
+      - name: Install
+        working-directory: ${{ matrix.project }}
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Lint
+        working-directory: ${{ matrix.project }}
+        run: ruff check .
+
+      - name: Check formatting
+        working-directory: ${{ matrix.project }}
+        run: ruff format --check .
+
+      - name: Test
+        working-directory: ${{ matrix.project }}
+        run: pytest
+
+  contracts:
+    name: Event contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: "**/pyproject.toml"
+
+      - name: Install the contracts tool
+        run: pip install -e "tools/contracts[dev]"
+
+      # Every *.schema.json is valid Draft 2020-12, its $refs resolve to files that exist, it
+      # follows the conventions the whole system reads it through, and the README index matches.
+      - name: Validate every event schema
+        run: studymind-contracts validate
+
+      # The Java wire types are generated from these schemas and checked in. If a schema moved and
+      # the types were not regenerated, this fails here rather than on the queue.
+      - name: Check the generated wire types are current
+        run: studymind-contracts codegen --check
+
+  openapi:
+    name: OpenAPI specs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Lint every specification
+        run: |
+          npx --yes "@stoplight/spectral-cli@${SPECTRAL_VERSION}" lint \
+            "services/*/openapi/openapi.yaml" \
+            --ruleset .spectral.yaml \
+            --fail-severity error
+
+  ci:
+    name: CI
+    if: always()
+    needs: [discover, backend, frontend, python, contracts, openapi]
+    runs-on: ubuntu-latest
+    steps:
+      # One job to require in branch protection: adding a service, a worker or the frontend must
+      # not mean editing the protected-branch settings. A skipped job is a job with nothing to do
+      # (no frontend yet, no Python project yet); a failed or cancelled one is not.
+      - name: Fail if any job failed
+        run: |
+          results="${{ join(needs.*.result, ' ') }}"
+          echo "job results: $results"
+          for result in $results; do
+            case "$result" in
+              failure|cancelled)
+                echo "::error::At least one CI job did not pass."
+                exit 1
+                ;;
+            esac
+          done

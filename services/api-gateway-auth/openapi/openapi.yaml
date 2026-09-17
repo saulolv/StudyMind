@@ -13,7 +13,9 @@ paths:
   /actuator/health:
     get:
       tags: [Health]
+      operationId: healthCheck
       summary: Service health
+      security: []
       responses:
         "200":
           description: OK
@@ -25,7 +27,9 @@ paths:
   /auth/register:
     post:
       tags: [Auth]
+      operationId: registerUser
       summary: Register user account
+      security: []
       requestBody:
         required: true
         content:
@@ -40,11 +44,18 @@ paths:
               schema:
                 $ref: "#/components/schemas/AuthResponse"
         "400":
-          description: Validation error
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
   /auth/login:
     post:
       tags: [Auth]
+      operationId: login
       summary: Login with email and password
+      description: |
+        On success the access token is in the body and the refresh token is set as an HttpOnly
+        cookie, so the SPA never holds the long-lived credential in JavaScript.
+      security: []
       requestBody:
         required: true
         content:
@@ -63,12 +74,20 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuthResponse"
+        "400":
+          $ref: "#/components/responses/Problem"
         "401":
-          description: Invalid credentials
+          $ref: "#/components/responses/Problem"
   /auth/refresh:
     post:
       tags: [Auth]
+      operationId: refreshToken
       summary: Refresh access token using HttpOnly cookie
+      description: |
+        Authenticated by the refresh cookie alone. No access token is required, which is the point:
+        this is the endpoint the SPA calls once the access token has expired.
+      security:
+        - refreshCookie: []
       responses:
         "200":
           description: Access token refreshed
@@ -77,17 +96,23 @@ paths:
               schema:
                 $ref: "#/components/schemas/AuthResponse"
         "401":
-          description: Invalid or expired refresh token
+          $ref: "#/components/responses/Problem"
   /auth/logout:
     post:
       tags: [Auth]
+      operationId: logout
       summary: Logout and revoke refresh token
+      security:
+        - refreshCookie: []
       responses:
         "204":
           description: Logout successful
+        "401":
+          $ref: "#/components/responses/Problem"
   /users/me:
     get:
       tags: [Users]
+      operationId: getCurrentUser
       summary: Get current authenticated user
       security:
         - bearerAuth: []
@@ -99,14 +124,42 @@ paths:
               schema:
                 $ref: "#/components/schemas/UserProfile"
         "401":
-          description: Missing or invalid access token
+          $ref: "#/components/responses/Problem"
 components:
   securitySchemes:
     bearerAuth:
       type: http
       scheme: bearer
       bearerFormat: JWT
+    refreshCookie:
+      type: apiKey
+      in: cookie
+      name: refresh_token
+      description: |
+        HttpOnly refresh token set by /auth/login. Revoking it is what /auth/logout does.
+  responses:
+    Problem:
+      description: RFC 9457 problem details
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetail"
   schemas:
+    ProblemDetail:
+      type: object
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string
+          format: uri
     RegisterRequest:
       type: object
       required: [email, password, full_name]

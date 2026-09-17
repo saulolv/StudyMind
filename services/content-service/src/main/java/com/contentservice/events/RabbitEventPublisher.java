@@ -1,5 +1,7 @@
 package com.contentservice.events;
 
+import com.contentservice.events.wire.ContentDeletedPayload;
+import com.contentservice.events.wire.ContentSubmittedPayload;
 import java.time.Clock;
 import java.time.format.DateTimeFormatter;
 import java.util.LinkedHashMap;
@@ -17,9 +19,11 @@ import tools.jackson.databind.ObjectMapper;
 /**
  * Production adapter at the {@link EventPublisher} seam.
  *
- * <p>The envelope is assembled as an explicit map rather than by reflecting over Java field names.
- * The wire contract lives in {@code contracts/events/v1/}, is consumed by Python workers, and must
- * not shift because someone renamed a record component.
+ * <p>The envelope is assembled as an explicit map rather than by reflecting over Java field names:
+ * its fields are all derived here and none of them vary per event. The payload is not, because that
+ * part of the wire does vary — it is built through the generated types in
+ * {@code com.contentservice.events.wire}, which come from {@code contracts/events/v1/}. Renaming a
+ * field in a schema therefore breaks this file rather than the Python workers reading the queue.
  */
 @Component
 class RabbitEventPublisher implements EventPublisher {
@@ -73,40 +77,41 @@ class RabbitEventPublisher implements EventPublisher {
 
     /**
      * Exhaustive over the sealed {@link EventPayload}: a new event type will not compile until it
-     * is given an {@code event_type} and a routing key here.
+     * is given a routing key here. The {@code event_type} comes from the schema, not from this file.
      */
     private static Descriptor describe(EventPayload payload) {
         return switch (payload) {
-            case ContentSubmitted ignored -> new Descriptor("ContentSubmitted", "content.submitted");
-            case ContentDeleted ignored -> new Descriptor("ContentDeleted", "content.deleted");
+            case ContentSubmitted ignored ->
+                    new Descriptor(ContentSubmittedPayload.EVENT_TYPE, "content.submitted");
+            case ContentDeleted ignored ->
+                    new Descriptor(ContentDeletedPayload.EVENT_TYPE, "content.deleted");
         };
     }
 
+    /**
+     * The one place a domain event becomes wire. Each setter below is named after a field in the
+     * schema that generated it, so a rename in a schema fails here at compile time rather than at
+     * a consumer that receives a key it does not recognise.
+     */
     private static Map<String, Object> body(EventPayload payload) {
-        Map<String, Object> body = new LinkedHashMap<>();
-        switch (payload) {
-            case ContentSubmitted event -> {
-                body.put("content_id", event.contentId().toString());
-                body.put("user_id", event.userId().toString());
-                body.put("type", event.type().name());
-                putIfPresent(body, "storage_path", event.storagePath());
-                putIfPresent(body, "file_name", event.fileName());
-                putIfPresent(body, "source_url", event.sourceUrl());
-            }
-            case ContentDeleted event -> {
-                body.put("content_id", event.contentId().toString());
-                body.put("user_id", event.userId().toString());
-                body.put("type", event.type().name());
-                putIfPresent(body, "storage_path", event.storagePath());
-            }
-        }
-        return body;
-    }
-
-    private static void putIfPresent(Map<String, Object> body, String key, String value) {
-        if (value != null) {
-            body.put(key, value);
-        }
+        return switch (payload) {
+            case ContentSubmitted event -> ContentSubmittedPayload.builder()
+                    .contentId(event.contentId())
+                    .userId(event.userId())
+                    .type(event.type().name())
+                    .storagePath(event.storagePath())
+                    .fileName(event.fileName())
+                    .sourceUrl(event.sourceUrl())
+                    .build()
+                    .toWireMap();
+            case ContentDeleted event -> ContentDeletedPayload.builder()
+                    .contentId(event.contentId())
+                    .userId(event.userId())
+                    .type(event.type().name())
+                    .storagePath(event.storagePath())
+                    .build()
+                    .toWireMap();
+        };
     }
 
     private static String currentCorrelationId() {

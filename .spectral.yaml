@@ -1,0 +1,135 @@
+# Ruleset for services/*/openapi/openapi.yaml.
+#
+# Three services ship springdoc, so a checked-in spec and the generated /swagger-ui can drift apart
+# with nothing to catch it. This cannot detect that drift by itself, but it does stop the checked-in
+# spec from being vague enough for the drift to go unnoticed: every operation has to say who may
+# call it, how it refuses, and what shape comes back.
+#
+# Run it with:
+#   npx --yes @stoplight/spectral-cli@6.15.0 lint "services/*/openapi/openapi.yaml"
+#
+# `/actuator/**` is deliberately out of scope for the StudyMind rules below. Those endpoints are
+# Spring Boot's, not this project's: their shape is not ours to design, and they are documented in
+# the specs only so a reader knows they are there.
+
+extends: [[spectral:oas, recommended]]
+
+aliases:
+  ApiOperations:
+    - "$.paths[?(!@property.startsWith('/actuator'))][get,put,post,delete,patch]"
+  ApiResponses:
+    - "$.paths[?(!@property.startsWith('/actuator'))][get,put,post,delete,patch].responses"
+
+rules:
+  # Promoted from warning: an operation with no operationId cannot be generated from, and every
+  # generator invents a different name for it.
+  operation-operationId: error
+  operation-operationId-unique: error
+  operation-operationId-valid-in-url: error
+  operation-tag-defined: error
+  operation-tags: error
+  oas3-valid-media-example: error
+  oas3-valid-schema-example: error
+
+  # `summary` carries the one-liner for every operation, which the rule below enforces.
+  # `description` is for the endpoints with something non-obvious to say, so a missing one is not
+  # a finding.
+  operation-description: off
+  info-contact: off
+
+  studymind-operation-has-a-summary:
+    description: One line saying what the operation does, for the reader scrolling the spec.
+    severity: error
+    given: "#ApiOperations"
+    then:
+      field: summary
+      function: truthy
+
+  studymind-operation-declares-security:
+    description: >-
+      Every operation states how the caller is authenticated. A public endpoint says so explicitly
+      with `security: []` rather than by omission, so "nobody decided" and "anyone may call this"
+      stop looking the same in the spec.
+    message: "{{path}} declares no `security`. Add a scheme, or `security: []` if it is public."
+    severity: error
+    given: "#ApiOperations"
+    then:
+      field: security
+      function: defined
+
+  studymind-operation-documents-a-failure:
+    description: >-
+      Every operation documents at least one way it refuses. A spec that lists only the happy path
+      leaves each client to guess the error shape, which is how error handling ends up per-caller.
+    message: "{{path}} documents no failure response."
+    severity: error
+    given: "#ApiResponses"
+    then:
+      function: schema
+      functionOptions:
+        schema:
+          type: object
+          anyOf:
+            - required: ["400"]
+            - required: ["401"]
+            - required: ["403"]
+            - required: ["404"]
+            - required: ["409"]
+            - required: ["422"]
+            - required: ["429"]
+            - required: ["500"]
+            - required: ["502"]
+            - required: ["503"]
+            - required: ["default"]
+
+  studymind-response-has-a-body-or-has-none-on-purpose:
+    description: >-
+      A response either documents its body or is one of the statuses that carries none. A 200 with
+      nothing but a description is a body the caller has to discover by calling it.
+    message: "{{path}} has no `content`. Use 202 or 204 if the response is genuinely empty."
+    severity: error
+    given: "$.paths[*][get,put,post,delete,patch].responses[?(@property != '202' && @property != '204')]"
+    then:
+      field: content
+      function: truthy
+
+  studymind-media-type-has-a-schema:
+    description: A media type with no schema says JSON comes back, and nothing else.
+    severity: error
+    given: $.paths[*][get,put,post,delete,patch].responses[*].content[*]
+    then:
+      field: schema
+      function: truthy
+
+  studymind-errors-are-problem-details:
+    description: >-
+      Failures are RFC 9457 problem details, `application/problem+json`, in every service. One error
+      shape across the system is what lets the frontend have one error handler instead of three.
+    message: "{{path}} must be documented as application/problem+json."
+    severity: error
+    given: "$.paths[?(!@property.startsWith('/actuator'))][get,put,post,delete,patch].responses[?(@property.match(/^[45]/))]"
+    then:
+      field: content.application/problem+json
+      function: truthy
+
+  studymind-schema-properties-are-snake-case:
+    description: >-
+      Every JSON body in this system is snake_case, matching contracts/events/v1 and the services'
+      `spring.jackson.property-naming-strategy`. A camelCase field in a spec is a field the running
+      service does not serve.
+    severity: error
+    given:
+      - $.components.schemas[*].properties[*]~
+      - $.paths[*][get,put,post,delete,patch]..content[*].schema.properties[*]~
+    then:
+      function: casing
+      functionOptions:
+        type: snake
+
+  studymind-servers-are-declared:
+    description: Without a server a reader cannot tell which port this service answers on.
+    severity: error
+    given: $
+    then:
+      field: servers
+      function: truthy

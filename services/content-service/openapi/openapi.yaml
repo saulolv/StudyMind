@@ -21,7 +21,9 @@ paths:
   /actuator/health:
     get:
       tags: [Health]
+      operationId: healthCheck
       summary: Service health
+      security: []
       responses:
         "200":
           description: OK
@@ -33,6 +35,7 @@ paths:
   /contents:
     post:
       tags: [Contents]
+      operationId: submitContent
       summary: Submit content for asynchronous processing
       description: |
         One endpoint, two sources. Send `multipart/form-data` with a `file` part to upload a PDF,
@@ -68,6 +71,7 @@ paths:
           $ref: "#/components/responses/Problem"
     get:
       tags: [Contents]
+      operationId: listContents
       summary: List the caller's contents, newest first
       security:
         - gatewayUser: []
@@ -97,6 +101,7 @@ paths:
   /contents/{contentId}:
     get:
       tags: [Contents]
+      operationId: getContent
       summary: Get content status and metadata
       security:
         - gatewayUser: []
@@ -115,6 +120,7 @@ paths:
           $ref: "#/components/responses/Problem"
     delete:
       tags: [Contents]
+      operationId: deleteContent
       summary: Delete content and trigger asynchronous cleanup
       description: |
         Removes the content row and emits `ContentDeleted`. Blob and vector removal are performed
@@ -133,6 +139,7 @@ paths:
   /internal/contents:
     get:
       tags: [Internal]
+      operationId: getInternalContentStatuses
       summary: Readiness of a batch of contents belonging to the caller
       description: |
         Replaces the `/internal/contents/{id}/ownership` and `/internal/videos/{id}/ownership`

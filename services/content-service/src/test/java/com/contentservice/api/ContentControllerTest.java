@@ -18,6 +18,7 @@ import com.contentservice.domain.Content;
 import com.contentservice.ingestion.ContentIngestion;
 import com.contentservice.ingestion.ContentSource;
 import com.contentservice.ingestion.InvalidContentSourceException;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
@@ -134,6 +135,54 @@ class ContentControllerTest {
         mockMvc.perform(get("/contents/" + CONTENT).header("X-User-Id", USER))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.title").value("Content not found"));
+    }
+
+    @Test
+    void returnsTheFullDetailShapeForASingleContent() throws Exception {
+        when(catalog.require(USER, CONTENT)).thenReturn(pdfContent());
+
+        mockMvc.perform(get("/contents/" + CONTENT).header("X-User-Id", USER))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content_id").value(CONTENT.toString()))
+                .andExpect(jsonPath("$.type").value("PDF"))
+                .andExpect(jsonPath("$.status").value("PENDING"))
+                .andExpect(jsonPath("$.file_name").value("lecture.pdf"))
+                .andExpect(jsonPath("$.storage_path").value("raw/u/c/lecture.pdf"))
+                .andExpect(jsonPath("$.created_at").exists())
+                .andExpect(jsonPath("$.updated_at").exists());
+    }
+
+    /**
+     * {@code URI} rejects this before ingestion ever sees it, so the controller has to turn a parse
+     * failure into the same 400 that an unsupported host produces.
+     */
+    @Test
+    void reportsAUrlThatIsNotEvenAUriAsABadRequest() throws Exception {
+        mockMvc.perform(post("/contents")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"url\":\"h ttp://broken url\"}")
+                        .header("X-User-Id", USER))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.detail").value("Malformed URL: h ttp://broken url"));
+
+        verify(ingestion, never()).ingest(any(), any());
+    }
+
+    @Test
+    void rejectsTheRequestWhenTheUploadedPartCannotBeRead() throws Exception {
+        MockMultipartFile unreadable = new MockMultipartFile(
+                "file", "lecture.pdf", "application/pdf", new byte[] {1}) {
+            @Override
+            public byte[] getBytes() throws IOException {
+                throw new IOException("stream closed");
+            }
+        };
+
+        mockMvc.perform(multipart("/contents").file(unreadable).header("X-User-Id", USER))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.detail").value("Could not read the uploaded file"));
+
+        verify(ingestion, never()).ingest(any(), any());
     }
 
     @Test

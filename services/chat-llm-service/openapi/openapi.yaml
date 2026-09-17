@@ -11,6 +11,7 @@ paths:
   /chat/sessions:
     post:
       tags: [Chat]
+      operationId: createChatSession
       summary: Create chat session
       security:
         - bearerAuth: []
@@ -27,8 +28,13 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ChatSession"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
     get:
       tags: [Chat]
+      operationId: listChatSessions
       summary: List user chat sessions
       security:
         - bearerAuth: []
@@ -45,9 +51,12 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/ChatSession"
+        "401":
+          $ref: "#/components/responses/Problem"
   /chat/sessions/{id}/messages:
     post:
       tags: [Chat]
+      operationId: sendChatMessage
       summary: Send question and get RAG answer (JSON or SSE)
       security:
         - bearerAuth: []
@@ -77,17 +86,24 @@ paths:
                 type: string
                 description: Server-Sent Events stream of generated tokens
         "400":
-          description: Invalid request
+          $ref: "#/components/responses/Problem"
         "401":
-          description: Unauthorized
+          $ref: "#/components/responses/Problem"
         "404":
-          description: Session not found
+          $ref: "#/components/responses/Problem"
 components:
   securitySchemes:
     bearerAuth:
       type: http
       scheme: bearer
       bearerFormat: JWT
+  responses:
+    Problem:
+      description: RFC 9457 problem details
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetail"
   parameters:
     SessionIdParam:
       in: path
@@ -97,6 +113,21 @@ components:
         type: string
         format: uuid
   schemas:
+    ProblemDetail:
+      type: object
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string
+          format: uri
     CreateSessionRequest:
       type: object
       properties:

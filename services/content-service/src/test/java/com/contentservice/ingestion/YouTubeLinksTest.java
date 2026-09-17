@@ -3,6 +3,7 @@ package com.contentservice.ingestion;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.net.URI;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -42,6 +43,30 @@ class YouTubeLinksTest {
             })
     void rejectsAnythingThatIsNotAYouTubeVideo(String url) {
         assertThat(YouTubeLinks.videoId(URI.create(url))).isEmpty();
+    }
+
+    @Test
+    void rejectsANullUrl() {
+        assertThat(YouTubeLinks.videoId(null)).isEmpty();
+    }
+
+    /** Parses as a URI with a host but no scheme, which is not something this service will fetch. */
+    @Test
+    void rejectsASchemeRelativeUrl() {
+        assertThat(YouTubeLinks.videoId(URI.create("//www.youtube.com/watch?v=dQw4w9WgXcQ"))).isEmpty();
+    }
+
+    @Test
+    void ignoresHostCasing() {
+        assertThat(YouTubeLinks.videoId(URI.create("https://WWW.YouTube.com/watch?v=dQw4w9WgXcQ")))
+                .contains("dQw4w9WgXcQ");
+    }
+
+    /** A query with a bare flag has a pair without "=", which must not blow up the parameter scan. */
+    @Test
+    void toleratesAMalformedQueryString() {
+        assertThat(YouTubeLinks.videoId(URI.create("https://www.youtube.com/watch?embedded&v=dQw4w9WgXcQ")))
+                .contains("dQw4w9WgXcQ");
     }
 
     @ParameterizedTest

@@ -15,6 +15,8 @@
     <description>PDF and YouTube ingestion behind a single content seam</description>
     <properties>
         <java.version>21</java.version>
+        <jacoco.version>0.8.13</jacoco.version>
+        <coverage.minimum>0.90</coverage.minimum>
         <awssdk.version>2.46.7</awssdk.version>
     </properties>
 
@@ -119,6 +121,65 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+            <!--
+                The coverage gate is in the build, not only in CI, so `./mvnw verify` locally fails
+                for the same reason the workflow does. Two things are excluded: the Spring Boot
+                bootstrap class, a main method with no branch to get wrong, and the wire types
+                generated from contracts/events/v1, which are verified by the contract test that
+                validates real published envelopes rather than by unit tests of their accessors.
+            -->
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <version>${jacoco.version}</version>
+                <configuration>
+                    <excludes>
+                        <exclude>**/*Application.class</exclude>
+                        <exclude>**/events/wire/*.class</exclude>
+                    </excludes>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>prepare-agent</id>
+                        <goals>
+                            <goal>prepare-agent</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>report</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>report</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>check-coverage</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                        <configuration>
+                            <rules>
+                                <rule>
+                                    <element>BUNDLE</element>
+                                    <limits>
+                                        <limit>
+                                            <counter>LINE</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>${coverage.minimum}</minimum>
+                                        </limit>
+                                        <limit>
+                                            <counter>BRANCH</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>${coverage.minimum}</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
             </plugin>
         </plugins>
     </build>

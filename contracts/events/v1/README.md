@@ -35,10 +35,24 @@ routing key stays coarse so a single binding sees every submission.
 
 ## Validation
 
-Use any JSON Schema validator compatible with Draft 2020-12.
+These files are checked in CI, not just written down. `studymind-contracts validate` (in
+`tools/contracts`) asserts that every schema here is valid Draft 2020-12, that its `$ref`s resolve
+to files that exist, that it follows the conventions above, and that this README lists exactly the
+events that have files.
 
 `content-service` validates every envelope it publishes against these files in its own test suite
-(`ContentSubmittedContractTest`), so the schemas are enforced rather than aspirational.
+(`ContentEventContractTest`), so the schemas are enforced rather than aspirational.
+
+## Generated code
+
+The Java payload types `content-service` builds its envelopes from are generated from these schemas
+by `studymind-contracts codegen` and checked in under `com.contentservice.events.wire`. Renaming a
+field here and regenerating breaks the compile at the call site; CI fails if a schema changed and
+the generated files were not regenerated. See
+[ADR-0004](../../../docs/architecture/adr/0004-generate-wire-types-from-the-event-contracts.md).
+
+Reliability conventions -- failure events, retries and dead-lettering -- are not covered by any
+contract here yet; see [EVENTS.md](../../../docs/architecture/EVENTS.md#reliability-and-what-is-missing).
 
 ## Changes
 

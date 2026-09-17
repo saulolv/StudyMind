@@ -25,6 +25,9 @@ import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  * Tests sit at the {@link ContentIngestion} interface: they exercise ingestion the way a controller
@@ -122,6 +125,72 @@ class DefaultContentIngestionTest {
                 .isInstanceOf(InvalidContentSourceException.class);
 
         assertThat(published).isEmpty();
+    }
+
+    @Test
+    void rejectsAnUploadWithNoBytesAtAll() {
+        ContentSource nothing = new ContentSource.PdfUpload("empty.pdf", null, "application/pdf");
+
+        assertThatThrownBy(() -> ingestion.ingest(USER, nothing))
+                .isInstanceOf(InvalidContentSourceException.class)
+                .hasMessageContaining("empty");
+
+        assertThat(published).isEmpty();
+    }
+
+    /** Shorter than the magic bytes themselves: the length check has to come before the comparison. */
+    @Test
+    void rejectsAFileTooShortToCarryTheMagicBytes() {
+        assertThatThrownBy(() -> ingestion.ingest(USER, pdf("tiny.pdf", "%PD")))
+                .isInstanceOf(InvalidContentSourceException.class)
+                .hasMessageContaining("not a PDF");
+
+        assertThat(blobs).isEmpty();
+    }
+
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(strings = {"", "   "})
+    void rejectsAnUploadWithNoFileName(String fileName) {
+        ContentSource unnamed = new ContentSource.PdfUpload(
+                fileName, "%PDF-1.4 x".getBytes(StandardCharsets.UTF_8), "application/pdf");
+
+        assertThatThrownBy(() -> ingestion.ingest(USER, unnamed))
+                .isInstanceOf(InvalidContentSourceException.class)
+                .hasMessageContaining("File name is required");
+
+        assertThat(blobs).isEmpty();
+    }
+
+    /** Names that sanitise down to nothing usable must not become a storage key. */
+    @ParameterizedTest
+    @ValueSource(strings = {".", "..", "/"})
+    void rejectsAFileNameThatSanitisesToNothingUsable(String fileName) {
+        assertThatThrownBy(() -> ingestion.ingest(USER, pdf(fileName, "%PDF-1.4 x")))
+                .isInstanceOf(InvalidContentSourceException.class)
+                .hasMessageContaining("not usable");
+
+        assertThat(blobs).isEmpty();
+        assertThat(published).isEmpty();
+    }
+
+    /** Anything outside the safe set is replaced, not rejected: the upload still has a real file. */
+    @Test
+    void replacesCharactersThatHaveNoBusinessInAStorageKey() {
+        Content content = ingestion.ingest(USER, pdf("aula 01: cálculo?.pdf", "%PDF-1.4 x"));
+
+        assertThat(content.fileName()).isEqualTo("aula_01__c_lculo_.pdf");
+        assertThat(content.storagePath()).isEqualTo(
+                "raw/%s/%s/aula_01__c_lculo_.pdf".formatted(USER, content.contentId()));
+    }
+
+    /** A 1024-character name would push the storage key past the column it has to fit in. */
+    @Test
+    void truncatesAnAbsurdlyLongFileName() {
+        Content content = ingestion.ingest(USER, pdf("x".repeat(300) + ".pdf", "%PDF-1.4 x"));
+
+        assertThat(content.fileName()).hasSize(200).endsWith(".pdf");
+        assertThat(content.storagePath()).endsWith("/" + content.fileName());
     }
 
     @Test
